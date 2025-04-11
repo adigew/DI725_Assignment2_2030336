@@ -1,16 +1,12 @@
-# Ignore model files
-out-sentiment/model.pt
-out-sentiment/*.pt  
-out-sentiment/
-out-sentiment-gpt2/
-out-sentiment-gpt2/*.pt  
-out-sentiment-scratch/
-out-sentiment-gpt2-improved/
-
-
 # Ignore data
 data/
 data/coco_annotations/
+
+# Ignore model save
+detr_auair_best.pth
+detr_auair_final.pth
+
+
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

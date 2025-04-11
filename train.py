@@ -6,6 +6,10 @@ from transformers import DetrImageProcessor
 from detr import get_detr_model
 from utils import AUAIRDataset, train_transform, val_transform
 
+def detr_collate_fn(batch):
+    """Custom collate function for DETR."""
+    return tuple(zip(*batch))
+
 def main(args):
     # Initialize WANDB
     wandb.init(project="DI725_Assignment2_2030336", config={
@@ -36,14 +40,14 @@ def main(args):
         batch_size=config.batch_size,
         shuffle=True,
         num_workers=2,
-        collate_fn=lambda x: tuple(zip(*x))
+        collate_fn=detr_collate_fn
     )
     val_loader = DataLoader(
         val_dataset,
         batch_size=config.batch_size,
         shuffle=False,
         num_workers=2,
-        collate_fn=lambda x: tuple(zip(*x))
+        collate_fn=detr_collate_fn
     )
 
     # Model
@@ -63,7 +67,7 @@ def main(args):
         model.train()
         train_loss = 0
         for images, targets in tqdm(train_loader, desc=f"Epoch {epoch+1}"):
-            images = torch.stack(images).to(device)
+            images = torch.stack(images).to(device).float() / 255.0
             targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
             
             # Convert boxes to DETR format [x_center, y_center, w, h]
@@ -78,7 +82,7 @@ def main(args):
                     boxes[:, 3] = boxes[:, 3] - boxes[:, 1]  # h
                 else:
                     boxes = torch.zeros((0, 4), dtype=torch.float32).to(device)
-                detr_targets.append({"boxes": boxes, "labels": t["labels"]})
+                detr_targets.append({"boxes": boxes, "class_labels": t["labels"]})
             
             outputs = model(pixel_values=images, labels=detr_targets)
             loss = outputs.loss
@@ -95,7 +99,7 @@ def main(args):
         val_loss = 0
         with torch.no_grad():
             for images, targets in val_loader:
-                images = torch.stack(images).to(device)
+                images = torch.stack(images).to(device).float() / 255.0
                 targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
                 detr_targets = []
                 for t in targets:
@@ -108,7 +112,7 @@ def main(args):
                         boxes[:, 3] = boxes[:, 3] - boxes[:, 1]
                     else:
                         boxes = torch.zeros((0, 4), dtype=torch.float32).to(device)
-                    detr_targets.append({"boxes": boxes, "labels": t["labels"]})
+                    detr_targets.append({"boxes": boxes, "class_labels": t["labels"]})
                 outputs = model(pixel_values=images, labels=detr_targets)
                 val_loss += outputs.loss.item()
         val_loss /= len(val_loader)
