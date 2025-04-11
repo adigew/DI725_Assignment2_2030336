@@ -7,7 +7,7 @@ from detr import get_detr_model
 from utils import AUAIRDataset, train_transform, val_transform
 
 # Initialize WANDB
-wandb.init(project="DI725_Assignment2_STUDENTNUMBER", config={
+wandb.init(project="DI725_Assignment2_2030336", config={
     "learning_rate": 1e-5,
     "backbone_lr": 1e-4,
     "epochs": 20,
@@ -30,8 +30,20 @@ val_dataset = AUAIRDataset(
     transform=val_transform
 )
 
-train_loader = DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True, num_workers=2)
-val_loader = DataLoader(val_dataset, batch_size=config.batch_size, shuffle=False, num_workers=2)
+train_loader = DataLoader(
+    train_dataset,
+    batch_size=config.batch_size,
+    shuffle=True,
+    num_workers=2,
+    collate_fn=lambda x: tuple(zip(*x))
+)
+val_loader = DataLoader(
+    val_dataset,
+    batch_size=config.batch_size,
+    shuffle=False,
+    num_workers=2,
+    collate_fn=lambda x: tuple(zip(*x))
+)
 
 # Model
 model = get_detr_model(num_classes=8).to(device)
@@ -50,16 +62,19 @@ for epoch in range(config.epochs):
     model.train()
     train_loss = 0
     for images, targets in tqdm(train_loader, desc=f"Epoch {epoch+1}"):
-        images = images.to(device)
+        images = torch.stack(images).to(device)
         targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
         
-        # Convert targets to DETR format
+        # Convert boxes to DETR format [x_center, y_center, w, h]
         detr_targets = []
         for t in targets:
-            detr_targets.append({
-                "boxes": t["boxes"],  # [x_min, y_min, x_max, y_max]
-                "labels": t["labels"]
-            })
+            boxes = t["boxes"]
+            if len(boxes) > 0:
+                boxes[:, 0] = (boxes[:, 0] + boxes[:, 2]) / 2  # x_center
+                boxes[:, 1] = (boxes[:, 1] + boxes[:, 3]) / 2  # y_center
+                boxes[:, 2] = boxes[:, 2] - boxes[:, 0]  # w
+                boxes[:, 3] = boxes[:, 3] - boxes[:, 1]  # h
+            detr_targets.append({"boxes": boxes, "labels": t["labels"]})
         
         outputs = model(pixel_values=images, labels=detr_targets)
         loss = outputs.loss
@@ -76,9 +91,17 @@ for epoch in range(config.epochs):
     val_loss = 0
     with torch.no_grad():
         for images, targets in val_loader:
-            images = images.to(device)
+            images = torch.stack(images).to(device)
             targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
-            detr_targets = [{"boxes": t["boxes"], "labels": t["labels"]} for t in targets]
+            detr_targets = []
+            for t in targets:
+                boxes = t["boxes"]
+                if len(boxes) > 0:
+                    boxes[:, 0] = (boxes[:, 0] + boxes[:, 2]) / 2
+                    boxes[:, 1] = (boxes[:, 1] + boxes[:, 3]) / 2
+                    boxes[:, 2] = boxes[:, 2] - boxes[:, 0]
+                    boxes[:, 3] = boxes[:, 3] - boxes[:, 1]
+                detr_targets.append({"boxes": boxes, "labels": t["labels"]})
             outputs = model(pixel_values=images, labels=detr_targets)
             val_loss += outputs.loss.item()
     val_loss /= len(val_loader)
