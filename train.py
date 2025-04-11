@@ -13,8 +13,8 @@ def detr_collate_fn(batch):
 def main(args):
     # Initialize WANDB
     wandb.init(project="DI725_Assignment2_2030336", config={
-        "learning_rate": 1e-5,
-        "backbone_lr": 1e-4,
+        "learning_rate": 5e-5,  # Increased
+        "backbone_lr": 5e-4,    # Increased
         "epochs": args.epochs,
         "batch_size": args.batch_size
     })
@@ -70,16 +70,15 @@ def main(args):
             images = torch.stack(images).to(device).float() / 255.0
             targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
             
-            # Convert boxes to DETR format [x_center, y_center, w, h]
             detr_targets = []
             for t in targets:
                 boxes = t["boxes"]
                 if len(boxes) > 0:
                     boxes = boxes.clone()
-                    boxes[:, 0] = (boxes[:, 0] + boxes[:, 2]) / 2  # x_center
-                    boxes[:, 1] = (boxes[:, 1] + boxes[:, 3]) / 2  # y_center
-                    boxes[:, 2] = boxes[:, 2] - boxes[:, 0]  # w
-                    boxes[:, 3] = boxes[:, 3] - boxes[:, 1]  # h
+                    boxes[:, 0] = (boxes[:, 0] + boxes[:, 2]) / 2
+                    boxes[:, 1] = (boxes[:, 1] + boxes[:, 3]) / 2
+                    boxes[:, 2] = boxes[:, 2] - boxes[:, 0]
+                    boxes[:, 3] = boxes[:, 3] - boxes[:, 1]
                 else:
                     boxes = torch.zeros((0, 4), dtype=torch.float32).to(device)
                 detr_targets.append({"boxes": boxes, "class_labels": t["labels"]})
@@ -94,7 +93,6 @@ def main(args):
         
         train_loss /= len(train_loader)
         
-        # Validation
         model.eval()
         val_loss = 0
         with torch.no_grad():
@@ -117,17 +115,14 @@ def main(args):
                 val_loss += outputs.loss.item()
         val_loss /= len(val_loader)
         
-        # Log to WANDB
         wandb.log({"epoch": epoch + 1, "train_loss": train_loss, "val_loss": val_loss})
         
-        # Save best model
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             torch.save(model.state_dict(), "detr_auair_best.pth")
         
         print(f"Epoch {epoch+1}: Train Loss = {train_loss:.4f}, Val Loss = {val_loss:.4f}")
 
-    # Save final model
     torch.save(model.state_dict(), "detr_auair_final.pth")
 
 if __name__ == "__main__":
@@ -139,5 +134,5 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=4, help="Batch size")
     args = parser.parse_args()
     
-    freeze_support()  # For Windows multiprocessing
+    freeze_support()
     main(args)
