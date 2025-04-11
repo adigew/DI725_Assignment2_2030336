@@ -10,7 +10,7 @@ out-sentiment-gpt2-improved/
 
 # Ignore data
 data/
-
+data/coco_annotations/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
