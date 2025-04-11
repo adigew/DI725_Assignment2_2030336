@@ -29,22 +29,30 @@ class AUAIRDataset(Dataset):
         boxes = []
         labels = []
         for ann in anns:
-            x, y, w, h = ann["bbox"]  # COCO format: [x_min, y_min, w, h]
-            boxes.append([x, y, x + w, y + h])  # Convert to [x_min, y_min, x_max, y_max] for DETR
+            x, y, w, h = ann["bbox"]  # COCO: [x_min, y_min, w, h]
+            boxes.append([x, y, x + w, y + h])  # DETR: [x_min, y_min, x_max, y_max]
             labels.append(ann["category_id"])
         
-        boxes = torch.tensor(boxes, dtype=torch.float32)
-        labels = torch.tensor(labels, dtype=torch.int64)
+        boxes = torch.tensor(boxes, dtype=torch.float32) if boxes else torch.zeros((0, 4), dtype=torch.float32)
+        labels = torch.tensor(labels, dtype=torch.int64) if labels else torch.zeros((0,), dtype=torch.int64)
         
         if self.transform:
-            transformed = self.transform(
-                image=np.array(img),
-                bboxes=boxes[:, :4],  # [x_min, y_min, x_max, y_max]
-                labels=labels
-            )
-            img = transformed["image"]
-            boxes = torch.tensor(transformed["bboxes"], dtype=torch.float32)
-            labels = torch.tensor(transformed["labels"], dtype=torch.int64)
+            box_list = boxes.tolist() if len(boxes) > 0 else []
+            label_list = labels.tolist() if len(labels) > 0 else []
+            
+            try:
+                transformed = self.transform(
+                    image=np.array(img),
+                    bboxes=box_list,
+                    labels=label_list
+                )
+                img = transformed["image"]
+                boxes = torch.tensor(transformed["bboxes"], dtype=torch.float32) if transformed["bboxes"] else torch.zeros((0, 4), dtype=torch.float32)
+                labels = torch.tensor(transformed["labels"], dtype=torch.int64) if transformed["labels"] else torch.zeros((0,), dtype=torch.int64)
+            except Exception as e:
+                img = A.Compose([A.Resize(800, 800), ToTensorV2()])(image=np.array(img))["image"]
+                boxes = torch.zeros((0, 4), dtype=torch.float32)
+                labels = torch.zeros((0,), dtype=torch.int64)
         
         target = {
             "boxes": boxes,  # [x_min, y_min, x_max, y_max]
@@ -59,9 +67,9 @@ train_transform = A.Compose([
     A.RandomBrightnessContrast(p=0.2),
     A.Rotate(limit=15, p=0.3),
     ToTensorV2()
-], bbox_params=A.BboxParams(format="pascal_voc", label_fields=["labels"]))
+], bbox_params=A.BboxParams(format="pascal_voc", label_fields=["labels"], min_visibility=0.1))
 
 val_transform = A.Compose([
     A.Resize(800, 800),
     ToTensorV2()
-], bbox_params=A.BboxParams(format="pascal_voc", label_fields=["labels"]))  
+], bbox_params=A.BboxParams(format="pascal_voc", label_fields=["labels"], min_visibility=0.1))

@@ -20,13 +20,13 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Datasets
 train_dataset = AUAIRDataset(
-    root="data/au_air",
-    annotation_file="data/au_air/coco_annotations/train.json",
+    root="data/auair2019",
+    annotation_file="data/auair2019/coco_annotations/train.json",
     transform=train_transform
 )
 val_dataset = AUAIRDataset(
-    root="data/au_air",
-    annotation_file="data/au_air/coco_annotations/val.json",
+    root="data/auair2019",
+    annotation_file="data/auair2019/coco_annotations/val.json",
     transform=val_transform
 )
 
