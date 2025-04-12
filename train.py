@@ -13,8 +13,8 @@ def detr_collate_fn(batch):
 def main(args):
     # Initialize WANDB
     wandb.init(project="DI725_Assignment2_2030336", config={
-        "learning_rate": 5e-5,  # Increased
-        "backbone_lr": 5e-4,    # Increased
+        "learning_rate": 5e-5,
+        "backbone_lr": 5e-4,
         "epochs": args.epochs,
         "batch_size": args.batch_size
     })
@@ -70,18 +70,37 @@ def main(args):
             images = torch.stack(images).to(device).float() / 255.0
             targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
             
+            # Prepare targets for DETR
             detr_targets = []
             for t in targets:
-                boxes = t["boxes"]
+                boxes = t["boxes"]  # [x_min, y_min, x_max, y_max]
                 if len(boxes) > 0:
                     boxes = boxes.clone()
-                    boxes[:, 0] = (boxes[:, 0] + boxes[:, 2]) / 2
-                    boxes[:, 1] = (boxes[:, 1] + boxes[:, 3]) / 2
-                    boxes[:, 2] = boxes[:, 2] - boxes[:, 0]
-                    boxes[:, 3] = boxes[:, 3] - boxes[:, 1]
+                    # Clamp to image boundaries (800x800)
+                    boxes[:, [0, 2]] = boxes[:, [0, 2]].clamp(0, 800)
+                    boxes[:, [1, 3]] = boxes[:, [1, 3]].clamp(0, 800)
+                    # Convert to [x_center, y_center, w, h]
+                    x_center = (boxes[:, 0] + boxes[:, 2]) / 2
+                    y_center = (boxes[:, 1] + boxes[:, 3]) / 2
+                    w = boxes[:, 2] - boxes[:, 0]
+                    h = boxes[:, 3] - boxes[:, 1]
+                    # Validate boxes
+                    valid = (w >= 0) & (h >= 0) & (~torch.isnan(w)) & (~torch.isnan(h))
+                    if not valid.all():
+                        print(f"Warning: Invalid boxes detected: {boxes[~valid]}")
+                        boxes = boxes[valid]
+                        labels = t["labels"][valid]
+                    else:
+                        labels = t["labels"]
+                    if len(boxes) > 0:
+                        boxes = torch.stack([x_center, y_center, w, h], dim=1)
+                    else:
+                        boxes = torch.zeros((0, 4), dtype=torch.float32).to(device)
+                        labels = torch.tensor([], dtype=torch.long).to(device)
                 else:
                     boxes = torch.zeros((0, 4), dtype=torch.float32).to(device)
-                detr_targets.append({"boxes": boxes, "class_labels": t["labels"]})
+                    labels = torch.tensor([], dtype=torch.long).to(device)
+                detr_targets.append({"boxes": boxes, "class_labels": labels})
             
             outputs = model(pixel_values=images, labels=detr_targets)
             loss = outputs.loss
@@ -104,13 +123,28 @@ def main(args):
                     boxes = t["boxes"]
                     if len(boxes) > 0:
                         boxes = boxes.clone()
-                        boxes[:, 0] = (boxes[:, 0] + boxes[:, 2]) / 2
-                        boxes[:, 1] = (boxes[:, 1] + boxes[:, 3]) / 2
-                        boxes[:, 2] = boxes[:, 2] - boxes[:, 0]
-                        boxes[:, 3] = boxes[:, 3] - boxes[:, 1]
+                        boxes[:, [0, 2]] = boxes[:, [0, 2]].clamp(0, 800)
+                        boxes[:, [1, 3]] = boxes[:, [1, 3]].clamp(0, 800)
+                        x_center = (boxes[:, 0] + boxes[:, 2]) / 2
+                        y_center = (boxes[:, 1] + boxes[:, 3]) / 2
+                        w = boxes[:, 2] - boxes[:, 0]
+                        h = boxes[:, 3] - boxes[:, 1]
+                        valid = (w >= 0) & (h >= 0) & (~torch.isnan(w)) & (~torch.isnan(h))
+                        if not valid.all():
+                            print(f"Warning: Invalid boxes in val: {boxes[~valid]}")
+                            boxes = boxes[valid]
+                            labels = t["labels"][valid]
+                        else:
+                            labels = t["labels"]
+                        if len(boxes) > 0:
+                            boxes = torch.stack([x_center, y_center, w, h], dim=1)
+                        else:
+                            boxes = torch.zeros((0, 4), dtype=torch.float32).to(device)
+                            labels = torch.tensor([], dtype=torch.long).to(device)
                     else:
                         boxes = torch.zeros((0, 4), dtype=torch.float32).to(device)
-                    detr_targets.append({"boxes": boxes, "class_labels": t["labels"]})
+                        labels = torch.tensor([], dtype=torch.long).to(device)
+                    detr_targets.append({"boxes": boxes, "class_labels": labels})
                 outputs = model(pixel_values=images, labels=detr_targets)
                 val_loss += outputs.loss.item()
         val_loss /= len(val_loader)
