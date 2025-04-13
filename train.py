@@ -3,8 +3,12 @@ from torch.utils.data import DataLoader
 import wandb
 from tqdm import tqdm
 from transformers import DetrImageProcessor
+import transformers.utils.logging as transformers_logging
 from detr import get_detr_model
 from utils import AUAIRDataset, train_transform, val_transform
+
+# Suppress Transformers warning
+transformers_logging.set_verbosity_error()
 
 def detr_collate_fn(batch):
     """Custom collate function for DETR."""
@@ -13,8 +17,8 @@ def detr_collate_fn(batch):
 def main(args):
     # Initialize WANDB
     wandb.init(project="DI725_Assignment2_2030336", config={
-        "learning_rate": 5e-5,
-        "backbone_lr": 5e-4,
+        "learning_rate": 5e-5,  # Lowered for convergence
+        "backbone_lr": 5e-6,   # Lowered for stability
         "epochs": args.epochs,
         "batch_size": args.batch_size
     })
@@ -52,6 +56,12 @@ def main(args):
 
     # Model
     model = get_detr_model(num_classes=8).to(device)
+    try:
+        model.load_state_dict(torch.load("detr_auair_best.pth", weights_only=True))
+        print("Loaded checkpoint from detr_auair_best.pth")
+    except FileNotFoundError:
+        print("No checkpoint found, starting fresh")
+
     processor = DetrImageProcessor.from_pretrained("facebook/detr-resnet-50")
 
     # Optimizer
@@ -63,37 +73,36 @@ def main(args):
 
     # Training loop
     best_val_loss = float("inf")
+    image_size = 800.0
+
     for epoch in range(config.epochs):
         model.train()
         train_loss = 0
         for images, targets in tqdm(train_loader, desc=f"Epoch {epoch+1}"):
             images = torch.stack(images).to(device).float() / 255.0
             targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
-            
-            # Prepare targets for DETR
+
             detr_targets = []
             for t in targets:
-                boxes = t["boxes"]  # [x_min, y_min, x_max, y_max]
+                boxes = t["boxes"]
                 if len(boxes) > 0:
                     boxes = boxes.clone()
-                    # Clamp to image boundaries (800x800)
-                    boxes[:, [0, 2]] = boxes[:, [0, 2]].clamp(0, 800)
-                    boxes[:, [1, 3]] = boxes[:, [1, 3]].clamp(0, 800)
-                    # Convert to [x_center, y_center, w, h]
-                    x_center = (boxes[:, 0] + boxes[:, 2]) / 2
-                    y_center = (boxes[:, 1] + boxes[:, 3]) / 2
-                    w = boxes[:, 2] - boxes[:, 0]
-                    h = boxes[:, 3] - boxes[:, 1]
-                    # Validate boxes
-                    valid = (w >= 0) & (h >= 0) & (~torch.isnan(w)) & (~torch.isnan(h))
+                    boxes[:, [0, 2]] = boxes[:, [0, 2]].clamp(0, image_size)
+                    boxes[:, [1, 3]] = boxes[:, [1, 3]].clamp(0, image_size)
+                    x_center = (boxes[:, 0] + boxes[:, 2]) / 2 / image_size
+                    y_center = (boxes[:, 1] + boxes[:, 3]) / 2 / image_size
+                    w = (boxes[:, 2] - boxes[:, 0]) / image_size
+                    h = (boxes[:, 3] - boxes[:, 1]) / image_size
+                    valid = (w > 0) & (h > 0) & (~torch.isnan(w)) & (~torch.isnan(h))
                     if not valid.all():
-                        print(f"Warning: Invalid boxes detected: {boxes[~valid]}")
+                        print(f"Warning: Invalid target boxes detected: {boxes[~valid]}")
                         boxes = boxes[valid]
                         labels = t["labels"][valid]
                     else:
                         labels = t["labels"]
                     if len(boxes) > 0:
                         boxes = torch.stack([x_center, y_center, w, h], dim=1)
+                        boxes = boxes.clamp(0, 1)  # Ensure normalized
                     else:
                         boxes = torch.zeros((0, 4), dtype=torch.float32).to(device)
                         labels = torch.tensor([], dtype=torch.long).to(device)
@@ -101,17 +110,29 @@ def main(args):
                     boxes = torch.zeros((0, 4), dtype=torch.float32).to(device)
                     labels = torch.tensor([], dtype=torch.long).to(device)
                 detr_targets.append({"boxes": boxes, "class_labels": labels})
-            
+
             outputs = model(pixel_values=images, labels=detr_targets)
+
+            # Validate predictions
+            pred_boxes = outputs.pred_boxes
+            if torch.isnan(pred_boxes).any() or (pred_boxes[..., 2:4] < 0).any():
+                print("Warning: Invalid predictions (NaN or negative w/h), skipping batch")
+                continue
+            pred_boxes = pred_boxes.clamp(0, 1)  # Ensure normalized
+
             loss = outputs.loss
+            if torch.isnan(loss) or not torch.isfinite(loss):
+                print("Warning: Invalid loss detected, skipping batch")
+                continue
             train_loss += loss.item()
-            
+
             optimizer.zero_grad()
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.3)  # Stricter clipping
             optimizer.step()
-        
+
         train_loss /= len(train_loader)
-        
+
         model.eval()
         val_loss = 0
         with torch.no_grad():
@@ -123,21 +144,22 @@ def main(args):
                     boxes = t["boxes"]
                     if len(boxes) > 0:
                         boxes = boxes.clone()
-                        boxes[:, [0, 2]] = boxes[:, [0, 2]].clamp(0, 800)
-                        boxes[:, [1, 3]] = boxes[:, [1, 3]].clamp(0, 800)
-                        x_center = (boxes[:, 0] + boxes[:, 2]) / 2
-                        y_center = (boxes[:, 1] + boxes[:, 3]) / 2
-                        w = boxes[:, 2] - boxes[:, 0]
-                        h = boxes[:, 3] - boxes[:, 1]
-                        valid = (w >= 0) & (h >= 0) & (~torch.isnan(w)) & (~torch.isnan(h))
+                        boxes[:, [0, 2]] = boxes[:, [0, 2]].clamp(0, image_size)
+                        boxes[:, [1, 3]] = boxes[:, [1, 3]].clamp(0, image_size)
+                        x_center = (boxes[:, 0] + boxes[:, 2]) / 2 / image_size
+                        y_center = (boxes[:, 1] + boxes[:, 3]) / 2 / image_size
+                        w = (boxes[:, 2] - boxes[:, 0]) / image_size
+                        h = (boxes[:, 3] - boxes[:, 1]) / image_size
+                        valid = (w > 0) & (h > 0) & (~torch.isnan(w)) & (~torch.isnan(h))
                         if not valid.all():
-                            print(f"Warning: Invalid boxes in val: {boxes[~valid]}")
+                            print(f"Warning: Invalid boxes in validation: {boxes[~valid]}")
                             boxes = boxes[valid]
                             labels = t["labels"][valid]
                         else:
                             labels = t["labels"]
                         if len(boxes) > 0:
                             boxes = torch.stack([x_center, y_center, w, h], dim=1)
+                            boxes = boxes.clamp(0, 1)
                         else:
                             boxes = torch.zeros((0, 4), dtype=torch.float32).to(device)
                             labels = torch.tensor([], dtype=torch.long).to(device)
@@ -148,13 +170,13 @@ def main(args):
                 outputs = model(pixel_values=images, labels=detr_targets)
                 val_loss += outputs.loss.item()
         val_loss /= len(val_loader)
-        
+
         wandb.log({"epoch": epoch + 1, "train_loss": train_loss, "val_loss": val_loss})
-        
+
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             torch.save(model.state_dict(), "detr_auair_best.pth")
-        
+
         print(f"Epoch {epoch+1}: Train Loss = {train_loss:.4f}, Val Loss = {val_loss:.4f}")
 
     torch.save(model.state_dict(), "detr_auair_final.pth")
@@ -162,11 +184,11 @@ def main(args):
 if __name__ == "__main__":
     import argparse
     from multiprocessing import freeze_support
-    
+
     parser = argparse.ArgumentParser(description="Train DETR on AU-AIR dataset")
     parser.add_argument("--epochs", type=int, default=20, help="Number of epochs")
     parser.add_argument("--batch_size", type=int, default=4, help="Batch size")
     args = parser.parse_args()
-    
+
     freeze_support()
     main(args)
