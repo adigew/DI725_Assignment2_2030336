@@ -5,7 +5,7 @@ data/coco_annotations/
 # Ignore model save
 detr_auair_best.pth
 detr_auair_final.pth
-
+hf_detr_auair/
 
 
 # Byte-compiled / optimized / DLL files
