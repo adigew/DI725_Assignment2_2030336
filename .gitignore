@@ -6,6 +6,7 @@ data/coco_annotations/
 gt.json
 pred.json
 predictions.json
+yolos_pred.json
 
 # Ignore model save
 detr_auair_best.pth
