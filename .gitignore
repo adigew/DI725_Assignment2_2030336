@@ -2,6 +2,11 @@
 data/
 data/coco_annotations/
 
+# Ignore json
+gt.json
+pred.json
+predictions.json
+
 # Ignore model save
 detr_auair_best.pth
 detr_auair_final.pth
