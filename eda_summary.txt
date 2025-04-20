@@ -1,0 +1,28 @@
+AUAIR2019 Dataset EDA Summary
+==========================
+
+Number of images: 32823
+Number of annotations: 132031
+Number of categories: 8
+
+Class Distribution:
+  car: 102619
+  person: 5158
+  truck: 9545
+  train: 9995
+  bicycle: 1128
+  traffic light: 2538
+  motorcycle: 319
+  bus: 729
+
+Image Size Statistics:
+  Width - Mean: 1920.00, Std: 0.00
+  Height - Mean: 1080.00, Std: 0.00
+
+Bounding Box Size Statistics:
+  Width - Mean: 127.50, Std: 106.92
+  Height - Mean: 84.98, Std: 66.94
+  Area - Mean: 16478.24, Std: 35409.70
+
+Objects per Image Statistics:
+  Mean: 4.02, Std: 3.99
