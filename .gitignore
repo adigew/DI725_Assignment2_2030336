@@ -13,6 +13,7 @@ detr_auair_best.pth
 detr_auair_final.pth
 hf_detr_auair/
 hf_detr_auair_optimized/
+yolos-tiny-finetuned
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
